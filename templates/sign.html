@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RegWatch Secure Sign</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-center p-6">
+    <div class="max-w-2xl w-full bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-2xl">
+        <div class="mb-6 border-b border-slate-800 pb-4">
+            <span class="text-xs font-mono uppercase tracking-widest text-emerald-400">RegWatch Secure Agreement</span>
+            <h1 id="docTitle" class="text-2xl font-bold mt-1">Non-Disclosure & Compliance Terms</h1>
+        </div>
+
+        <div id="docContent" class="bg-slate-950 p-4 rounded-lg border border-slate-800 h-48 overflow-y-auto mb-6 text-sm text-slate-300 font-mono">
+            Loading agreement terms...
+        </div>
+
+        <form id="signForm" class="space-y-4">
+            <div>
+                <label class="block text-xs font-medium uppercase text-slate-400 mb-1">Full Legal Name</label>
+                <input type="text" id="signerName" required class="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium uppercase text-slate-400 mb-1">Email Address</label>
+                <input type="email" id="signerEmail" required class="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-emerald-500">
+            </div>
+            <div class="pt-4">
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-3 rounded-lg transition">
+                    Sign & Cryptographically Seal
+                </button>
+            </div>
+        </form>
+
+        <div id="resultBox" class="hidden mt-6 p-4 rounded-lg bg-emerald-950/50 border border-emerald-800 text-emerald-300 text-sm"></div>
+    </div>
+
+    <script>
+        document.getElementById('docContent').innerText = "1. PARTIES: This Agreement is entered into by and between RegWatch Platform and the executing Signer.\n\n2. TERMS: The Signer agrees to abide by compliance protocols, audit logging, and data sovereignty rules.\n\n3. CRYPTOGRAPHIC BINDING: Execution of this agreement generates an immutable SHA-256 hash linked directly to your audit record.";
+
+        document.getElementById('signForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                document_title: document.getElementById('docTitle').innerText,
+                content: document.getElementById('docContent').innerText,
+                signer_name: document.getElementById('signerName').value,
+                signer_email: document.getElementById('signerEmail').value
+            };
+
+            const res = await fetch('/v1/sign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            
+            const resultBox = document.getElementById('resultBox');
+            resultBox.classList.remove('hidden');
+            if (res.ok) {
+                resultBox.innerHTML = `<strong>Successfully Signed!</strong><br>Agreement ID: ${data.agreement_id}<br><span class="font-mono text-xs text-slate-400">Hash: ${data.document_hash}</span>`;
+            } else {
+                resultBox.className = "mt-6 p-4 rounded-lg bg-red-950/50 border border-red-800 text-red-300 text-sm";
+                resultBox.innerText = `Error: ${data.detail || 'Signing failed'}`;
+            }
+        });
+    </script>
+</body>
+</html>
