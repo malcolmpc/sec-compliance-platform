@@ -14,6 +14,41 @@ templates = Jinja2Templates(directory="templates")
 
 DB_PATH = "data/platform_state.duckdb"
 
+class TemplateCreateRequest(BaseModel):
+    template_id: str
+    title: str
+    version: str
+    content_template: str
+    required_screening_level: str = "CIP_FULL"
+
+@app.post("/v1/templates")
+def register_template(req: TemplateCreateRequest):
+    return create_template(req.template_id, req.title, req.version, req.content_template, req.required_screening_level)
+
+@app.get("/v1/templates")
+def list_templates():
+    conn = duckdb.connect(SIGNATURES_DB_PATH)
+    templates = conn.execute("SELECT template_id, title, version, required_screening_level, created_at FROM agreement_templates").fetchall()
+    conn.close()
+    return {"templates": templates}
+
+from fastapi.responses import FileResponse
+from pdf_generator import generate_dossier_pdf
+
+@app.get("/v1/compliance/dossier/{identifier}/pdf")
+def get_compliance_dossier_pdf(identifier: str):
+    """
+    Generate and download an official PDF audit report for a given entity or user.
+    """
+    dossier = generate_compliance_dossier(identifier)
+    if not dossier["cip_and_screening_records"] and not dossier["executed_agreements"]:
+        raise HTTPException(status_code=404, detail=f"No records found for identifier: {identifier}")
+    
+    pdf_filename = f"data/dossier_{identifier.replace(' ', '_')}.pdf"
+    generate_dossier_pdf(dossier, pdf_filename)
+    
+    return FileResponse(pdf_filename, media_type='application/pdf', filename=f"compliance_dossier_{identifier}.pdf")
+
 def get_db_connection():
     os.makedirs("data", exist_ok=True)
     conn = duckdb.connect(DB_PATH)

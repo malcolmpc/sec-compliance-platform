@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  regwatch:
+    build: .
+    container_name: regwatch_platform
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

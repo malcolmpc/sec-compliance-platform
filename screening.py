@@ -1,56 +1,88 @@
-from thefuzz import fuzz
+import os
+import csv
+import requests
+import duckdb
 
-# Watchlist for KYB (Entities)
-WATCHLIST_ENTITIES = [
-    {"name": "ACME GLOBAL CORP", "category": "Sanctioned Entity", "country": "RU"},
-    {"name": "SHADY HOLDINGS LLC", "category": "Blocked Entity", "country": "KP"}
-]
+OPENSANCTIONS_CSV_URL = "https://data.opensanctions.org/datasets/latest/default/targets.simple.csv"
+SANCTIONS_DB_PATH = "data/platform_state.duckdb"
 
-# Watchlist for KYC (Individuals)
-WATCHLIST_INDIVIDUALS = [
-    {"name": "VICTOR V. VANCE", "dob": "1985-04-12", "category": "Politically Exposed Person (PEP)", "country": "CY"},
-    {"name": "DMITRY V. IVANOV", "dob": "1972-09-23", "category": "SDN Sanctioned Individual", "country": "RU"}
-]
+def sync_sanctions_database():
+    """
+    Downloads and indexes the official OpenSanctions bulk CSV feed 
+    into DuckDB for lightning-fast, offline compliance screening.
+    """
+    os.makedirs("data", exist_ok=True)
+    conn = duckdb.connect(SANCTIONS_DB_PATH)
+    
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sanctions_catalog (
+            id VARCHAR,
+            name VARCHAR,
+            datasets VARCHAR,
+            countries VARCHAR,
+            topics VARCHAR
+        )
+    """)
+    
+    # Check if catalog is already populated
+    count = conn.execute("SELECT COUNT(*) FROM sanctions_catalog").fetchone()[0]
+    if count > 0:
+        conn.close()
+        return  # Already synced
+    
+    print("Syncing OpenSanctions watchlist database...")
+    response = requests.get(OPENSANCTIONS_CSV_URL, stream=True)
+    if response.status_code == 200:
+        decoded_content = response.content.decode('utf-8').splitlines()
+        reader = csv.DictReader(decoded_content)
+        
+        batch = []
+        for row in reader:
+            batch.append((
+                row.get("id"),
+                row.get("name"),
+                row.get("datasets"),
+                row.get("countries"),
+                row.get("topics")
+            ))
+            if len(batch) >= 1000:
+                conn.executemany("INSERT INTO sanctions_catalog VALUES (?, ?, ?, ?, ?)", batch)
+                batch = []
+        if batch:
+            conn.executemany("INSERT INTO sanctions_catalog VALUES (?, ?, ?, ?, ?)", batch)
+    conn.close()
 
-def screen_entity_name(query_name: str, threshold: int = 85):
-    best_match = None
-    highest_score = 0
-
-    for entry in WATCHLIST_ENTITIES:
-        score = fuzz.token_set_ratio(query_name.upper(), entry["name"])
-        if score > highest_score:
-            highest_score = score
-            best_match = entry
-
-    if highest_score >= threshold:
+def screen_individual_person(full_name: str, dob: str, country: str, threshold: int = 85):
+    sync_sanctions_database()
+    conn = duckdb.connect(SANCTIONS_DB_PATH)
+    
+    # Exact or substring match against live global sanctions/PEP database
+    match = conn.execute(
+        """
+        SELECT name, datasets, countries, topics 
+        FROM sanctions_catalog 
+        WHERE LOWER(name) LIKE LOWER(?) 
+        LIMIT 1
+        """,
+        [f"%{full_name.strip()}%"]
+    ).fetchone()
+    conn.close()
+    
+    if match:
         return {
             "flagged": True,
-            "confidence_score": highest_score,
-            "matched_entity": best_match["name"],
-            "category": best_match["category"],
-            "country": best_match["country"]
+            "confidence_score": 100,
+            "matched_name": match[0],
+            "datasets": match[1],
+            "country": match[2],
+            "category": match[3]
         }
-    
-    return {"flagged": False, "confidence_score": highest_score, "matched_entity": None}
+    return {
+        "flagged": False,
+        "confidence_score": 0,
+        "matched_name": None,
+        "category": "Clear"
+    }
 
-def screen_individual_person(full_name: str, dob: str = None, country: str = None, threshold: int = 85):
-    best_match = None
-    highest_score = 0
-
-    for entry in WATCHLIST_INDIVIDUALS:
-        score = fuzz.token_set_ratio(full_name.upper(), entry["name"])
-        if score > highest_score:
-            highest_score = score
-            best_match = entry
-
-    if highest_score >= threshold:
-        return {
-            "flagged": True,
-            "confidence_score": highest_score,
-            "matched_name": best_match["name"],
-            "matched_dob": best_match["dob"],
-            "category": best_match["category"],
-            "country": best_match["country"]
-        }
-    
-    return {"flagged": False, "confidence_score": highest_score, "matched_name": None}
+def screen_entity_name(entity_name: str, threshold: int = 85):
+    return screen_individual_person(entity_name, "", "", threshold)

@@ -3,6 +3,33 @@ import os
 import duckdb
 from datetime import datetime
 
+def init_templates_table():
+    conn = duckdb.connect(SIGNATURES_DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agreement_templates (
+            template_id VARCHAR PRIMARY KEY,
+            title VARCHAR,
+            version VARCHAR,
+            content_template VARCHAR,
+            required_screening_level VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.close()
+
+def create_template(template_id: str, title: str, version: str, content_template: str, screening_level: str = "CIP_FULL"):
+    init_templates_table()
+    conn = duckdb.connect(SIGNATURES_DB_PATH)
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO agreement_templates 
+        (template_id, title, version, content_template, required_screening_level) 
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [template_id, title, version, content_template, screening_level]
+    )
+    conn.close()
+    return {"status": "success", "template_id": template_id, "version": version}
 SIGNATURES_DB_PATH = "data/platform_state.duckdb"
 
 def init_signatures_table():
